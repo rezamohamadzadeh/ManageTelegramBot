@@ -8,9 +8,9 @@ namespace ManageTelegramBot.Controllers
     [Route("api/[controller]")]
     public class UpdateController : Controller
     {
-        private readonly IUpdateService _updateService;
+        private readonly IManageBotService _updateService;
 
-        public UpdateController(IUpdateService updateService)
+        public UpdateController(IManageBotService updateService)
         {
             _updateService = updateService;
         }

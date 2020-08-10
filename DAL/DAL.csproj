@@ -5,19 +5,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Migrations\20200728050847_FtpAccountModel.cs" />
-    <Compile Remove="Migrations\20200728050847_FtpAccountModel.Designer.cs" />
-    <Compile Remove="Migrations\20200728050949_FtpAccountModel.cs" />
-    <Compile Remove="Migrations\20200728050949_FtpAccountModel.Designer.cs" />
-    <Compile Remove="Migrations\20200728052509_FtpAccountModel.cs" />
-    <Compile Remove="Migrations\20200728052509_FtpAccountModel.Designer.cs" />
-    <Compile Remove="Migrations\20200728052549_FtpAccountModel.cs" />
-    <Compile Remove="Migrations\20200728052549_FtpAccountModel.Designer.cs" />
-    <Compile Remove="Migrations\20200728052840_FtpAccountModel.cs" />
-    <Compile Remove="Migrations\20200728052840_FtpAccountModel.Designer.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Identity" Version="2.2.0" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="3.1.6" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="3.1.6" />

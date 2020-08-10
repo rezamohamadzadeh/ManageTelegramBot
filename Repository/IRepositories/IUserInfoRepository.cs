@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Repository.IRepositories
 {
-    public interface IAffiliateRepository : IGenericRepository<Tb_Affiliates>
+    public interface IUserInfoRepository : IGenericRepository<Tb_UserInfo>
     {
     }
 }

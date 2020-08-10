@@ -25,33 +25,15 @@ namespace ManageTelegramBot
 
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddScoped<IUpdateService, UpdateService>();
+            services.AddHttpClient();
+            services.AddScoped<IManageBotService, ManageBotService>();
             services.AddSingleton<IBotService, BotService>();
             services.AddTransient<IUnitOfWork, UnitOfWork>();
             services
                 .AddControllers()
                 .AddNewtonsoftJson();
 
-            services.AddDbContext<ApplicationDbContext>(Options => Options.UseSqlServer(Configuration.GetConnectionString("Local")));
-
-            #region identity
-            services.AddIdentity<ApplicationUser, IdentityRole>()
-                    .AddRoleManager<RoleManager<IdentityRole>>()
-                    .AddDefaultTokenProviders()
-                    .AddEntityFrameworkStores<ApplicationDbContext>();
-
-            services.Configure<IdentityOptions>(option =>
-            {
-                option.Password.RequireLowercase = false;
-                option.Password.RequireNonAlphanumeric = false;
-                option.Password.RequireUppercase = false;
-            });
-
-            services.ConfigureApplicationCookie(options =>
-            {
-                options.ExpireTimeSpan = TimeSpan.FromHours(1);  // for set time out cookie authentication
-            });
-            #endregion
+            services.AddDbContext<ApplicationDbContext>(Options => Options.UseSqlServer(Configuration.GetConnectionString("Local")));            
         }
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)

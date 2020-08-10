@@ -19,46 +19,32 @@ namespace Repository
             _dbContext = dbContext;
         }
 
-        private UserRepository _UserRepo;
-        public UserRepository UserRepo
+
+        private UserInfoRepository _userInfoRepository;
+
+        public UserInfoRepository UserInfoRepo
         {
             get
             {
-                if (_UserRepo == null)
+                if (_userInfoRepository == null)
                 {
-                    _UserRepo = new UserRepository(_dbContext);
+                    _userInfoRepository = new UserInfoRepository(_dbContext);
                 }
-                return _UserRepo;
+                return _userInfoRepository;
             }
         }
 
+         private UserActivitiesRepository _userActivitiesRepository;
 
-
-        private AffiliateRepository _affiliateRepository;
-
-        public AffiliateRepository AffiliateRepo
+        public UserActivitiesRepository UserActivitiesRepo
         {
             get
             {
-                if (_affiliateRepository == null)
+                if (_userActivitiesRepository == null)
                 {
-                    _affiliateRepository = new AffiliateRepository(_dbContext);
+                    _userActivitiesRepository = new UserActivitiesRepository(_dbContext);
                 }
-                return _affiliateRepository;
-            }
-        }
-
-        private SellRepository _sellRepository;
-
-        public SellRepository SellRepo
-        {
-            get
-            {
-                if (_sellRepository == null)
-                {
-                    _sellRepository = new SellRepository(_dbContext);
-                }
-                return _sellRepository;
+                return _userActivitiesRepository;
             }
         }
 
@@ -75,45 +61,6 @@ namespace Repository
         {
             _dbContext.Dispose();
         }
-
-
-        #region BackUpFromDb
-
-        /// <summary>
-        /// Back Up from db with hangfire jobs
-        /// </summary>
-        /// <param name="databaseName"></param>
-        /// <returns></returns>
-        public void BackUpFromDb(DatabaseName databaseName)
-        {
-            string savePath = "";
-            string DirectoryPath = "";
-            string BackUpFolder = "BackUp\\";
-            var dbName = databaseName.ToString();
-
-            switch (databaseName)
-            {
-                case DatabaseName.BaseProj:
-                    savePath = Path.Combine(Directory.GetCurrentDirectory(), BackUpFolder + dbName + "\\", dbName + "_" + DateTime.Now.ToString("yyyy-MM-dd_hh-mm-ss") + ".bak");
-                    DirectoryPath = Path.Combine(Directory.GetCurrentDirectory(), BackUpFolder + dbName);
-
-                    break;
-                case DatabaseName.BuyerProfile:
-                    savePath = Path.Combine(Directory.GetCurrentDirectory(), BackUpFolder + dbName + "\\", dbName + "_" + DateTime.Now.ToString("yyyy-MM-dd_hh-mm-ss") + ".bak");
-                    DirectoryPath = Path.Combine(Directory.GetCurrentDirectory(), BackUpFolder + dbName);
-
-                    break;
-                default:
-                    break;
-            }
-            if (!Directory.Exists(DirectoryPath))
-            {
-                Directory.CreateDirectory(DirectoryPath);
-            }
-            _dbContext.Database.ExecuteSqlRaw("BACKUP DATABASE {0} TO DISK = {1}", dbName, savePath);
-
-        }
-        #endregion
 
     }
 }
