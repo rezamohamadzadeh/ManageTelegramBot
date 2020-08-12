@@ -1,5 +1,6 @@
 ﻿
 using System;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace DAL.Models
 {
@@ -7,8 +8,9 @@ namespace DAL.Models
     {
         public string Message { get; set; }
 
-
+        [ForeignKey("Tb_UserInfo")]
         public Guid UserInfoId { get; set; }
+
         public virtual Tb_UserInfo Tb_UserInfo { get; set; }
 
     }

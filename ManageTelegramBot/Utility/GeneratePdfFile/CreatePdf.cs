@@ -1,4 +1,4 @@
-﻿using Accounting.Models;
+﻿using ManageTelegramBot.Models;
 using PdfRpt.Core.Contracts;
 using PdfRpt.FluentInterface;
 using System;

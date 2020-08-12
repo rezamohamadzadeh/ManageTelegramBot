@@ -14,6 +14,8 @@ namespace DAL.Models
 
         public string Password { get; set; }
 
+        public string UserType { get; set; }
+
         public bool LoginState { get; set; }
 
         public virtual List<Tb_UserActivities> Tb_UserActivities { get; set; }

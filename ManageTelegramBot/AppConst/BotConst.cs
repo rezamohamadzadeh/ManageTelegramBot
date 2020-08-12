@@ -14,6 +14,9 @@ namespace ManageTelegramBot.AppConst
         public const string weekly = "Weekly 📄";
         public const string logOut = "LogOut 🔴";
         public const string back = "Back ↩️";
+        public const string enterUserName = "Please enter your username:";
+        public const string enterPassword = "Please enter your password:";
+        public const string selectFilterOption = "Please select your option :";
 
     }
 }

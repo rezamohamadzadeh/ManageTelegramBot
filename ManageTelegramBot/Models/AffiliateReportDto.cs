@@ -1,5 +1,5 @@
 ﻿
-namespace Accounting.Models
+namespace ManageTelegramBot.Models
 {
     public class AffiliateReportDto
     {

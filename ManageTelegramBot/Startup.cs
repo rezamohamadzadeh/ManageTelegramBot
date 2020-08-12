@@ -26,8 +26,9 @@ namespace ManageTelegramBot
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddHttpClient();
+            services.AddHttpContextAccessor();
             services.AddScoped<IManageBotService, ManageBotService>();
-            services.AddSingleton<IBotService, BotService>();
+            services.AddScoped<IBotService, BotService>();
             services.AddTransient<IUnitOfWork, UnitOfWork>();
             services
                 .AddControllers()
