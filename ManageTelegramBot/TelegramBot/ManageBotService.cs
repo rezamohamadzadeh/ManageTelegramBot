@@ -14,8 +14,6 @@ using Repository.InterFace;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
-using Newtonsoft.Json;
-using Accounting.Utility.GeneratePdfFile;
 using System.IO;
 using Telegram.Bot.Types.InputFiles;
 
@@ -55,16 +53,40 @@ namespace ManageTelegramBot.TelegramBot
 
             try
             {
-                if (up.Message.From.IsBot)
+
+                if (up.CallbackQuery != null)
                 {
+                    var userInfo = GetUserByChatId(up.CallbackQuery.Message.Chat.Id);
+
+                    if (userInfo == null)
+                    {
+                        await LogOutUser(up);
+                        return;
+                    }
+
+                    try
+                    {
+                        var affiliateSell = await GetAffiliateSellsApi(up.CallbackQuery.Data);
+                        var inputOnlineFile = new InputOnlineFile(affiliateSell, up.CallbackQuery.Data + ".pdf");
+
+                        var message = await _botService.Client.SendTextMessageAsync(up.CallbackQuery.Message.Chat.Id, "Sending file...");
+                        await _botService.Client.SendDocumentAsync(up.CallbackQuery.Message.Chat.Id, inputOnlineFile);
+                        await _botService.Client.DeleteMessageAsync(up.CallbackQuery.Message.Chat.Id, message.MessageId);
+
+                    }
+                    catch (Exception)
+                    {
+                        await InvalidLogin(up, "❌ Invalid Login.");
+                        await LogOutUser(up);
+                    }
+
                     return;
                 }
-
                 if (up.Message.Type == MessageType.Text)
                 {
                     var userInfo = GetUserByChatId(up.Message.Chat.Id);
-
                     var lastState = _uow.UserActivitiesRepo.Get(d => d.Tb_UserInfo.ChatId == up.Message.Chat.Id && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+
                     if (up.Message.Text == "/start")
                     {
                         var user = InsertUserInfo(up.Message.Chat.Id);
@@ -100,7 +122,7 @@ namespace ManageTelegramBot.TelegramBot
 
                     else if (up.Message.Text == BotConst.back)
                     {
-                        if (lastState.Message.Contains(BotConst.adminText) || lastState.Message.Contains(BotConst.affiliateText))
+                        if (lastState.Message.Contains(BotConst.adminText) || lastState.Message == BotConst.affiliateText)
                             await StartBot(up, "Dear {0}, Please select your user type:");
 
                         else if (lastState.Message.Contains(BotConst.enterUserName))
@@ -110,7 +132,25 @@ namespace ManageTelegramBot.TelegramBot
                             await SelectUserType(up);
                         }
                     }
-                    else if(up.Message.Text == BotConst.logOut)
+                    else if (up.Message.Text == BotConst.selectAffiliates)
+                    {
+                        List<InlineKeyboardButton> btnList = new List<InlineKeyboardButton>();
+
+                        var affiliates = await GetAffiliatesApi();
+                        foreach (var affiliate in affiliates)
+                        {
+                            btnList.Add(new InlineKeyboardButton() { Text = affiliate.FirstName, CallbackData = affiliate.Code });
+
+                        }
+
+                        var inlineBtns = GenerateReplyKeyboardMarkup(btnList);
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Affiliates List", ParseMode.Default, false, false, 0, inlineBtns);
+
+                        var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
+
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Please select affiliate user 👆", replyMarkup: markupKeyboard);
+                    }
+                    else if (up.Message.Text == BotConst.logOut)
                     {
                         await LogOutUser(up);
                     }
@@ -151,7 +191,7 @@ namespace ManageTelegramBot.TelegramBot
                             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "✅ Logged in successfully.");
                             if (user.UserType.Contains(BotConst.adminText))
                             {
-                                var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.logOut);
+                                var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
 
                                 await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.selectFilterOption, replyMarkup: markupKeyboard);
 
@@ -208,72 +248,61 @@ namespace ManageTelegramBot.TelegramBot
             var userAuth = GetUserByChatId(up.Message.Chat.Id);
             if (userAuth == null)
             {
-                LogOutUser(up);
+                await LogOutUser(up);
                 return;
             }
-            try
-            {
-                var affiliates = userAuth.UserType.Contains(BotConst.adminText) ? await GetAffiliates() : await GetAffiliates(userAuth.UserName);
-                foreach (var affiliate in affiliates)
-                {
-                    var report = new AffiliateReportDto();
-                    if (userAuth.UserType.Contains(BotConst.adminText))
-                    {
-                        switch (filterDate)
-                        {
-                            case FilterDate.All:
-                                report = await GetAffiliateSells(affiliate.Code, affiliate.Email, FilterDate.All.ToString());
-                                break;
-
-                            case FilterDate.Monthly:
-                                report = await GetAffiliateSells(affiliate.Code, affiliate.Email, FilterDate.Monthly.ToString());
-                                break;
-
-                            case FilterDate.Weekly:
-                                report = await GetAffiliateSells(affiliate.Code, affiliate.Email, FilterDate.Weekly.ToString());
-                                break;
-                            default:
-                                break;
-                        }
-                    }
-                    else
-                        report = await GetAffiliateSells(affiliate.Code, affiliate.Email, FilterDate.Weekly.ToString());
-
-                    list.Add(report);
-                }
-            }
-            catch (Exception)
-            {
-
-                throw;
-            }
 
             try
             {
-                // generate pdf file
-                var pdfFile = CreatePdf.createReport(_hostingEnvironment.WebRootPath, list).GenerateAsByteArray();
-                Stream stream = new MemoryStream(pdfFile);
-                var inputOnlineFile = new InputOnlineFile(stream, "AffiliateSellReport.pdf");
+                var affiliateReportFile = await GetAffiliateReportApi(filterDate.ToString(), userAuth.UserType, userAuth.UserName);
+                var inputOnlineFile = new InputOnlineFile(affiliateReportFile, "AffiliateSellReport.pdf");
 
                 var message = await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Sending file...");
                 await _botService.Client.SendDocumentAsync(up.Message.Chat.Id, inputOnlineFile);
                 await _botService.Client.DeleteMessageAsync(up.Message.Chat.Id, message.MessageId);
 
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 await InvalidLogin(up, "❌ Invalid Login.");
-                LogOutUser(up);
+                await LogOutUser(up);
             }
 
         }
-        public async Task LogOutUser(Update up)
+
+        private async Task<Stream> GetAffiliateReportApi(string filterDate, string userType, string email)
+        {
+            var url = _configuration["BaseApiUrl"];
+            url += string.Format("/api/Affiliate/GetAffiliateUsers?filterDate={0}&userType={1}&email={2}", filterDate, userType, email);
+            var api = _client.CreateClient();
+            try
+            {
+                HttpResponseMessage messages = await api.GetAsync(url);
+
+                if (messages.IsSuccessStatusCode)
+                {
+                    var contentResult = await messages.Content.ReadAsAsync<JsonResultContent<byte[]>>();
+                    Stream stream = new MemoryStream(contentResult.Data);
+                    return stream;
+                }
+                else
+                    return null;
+
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+
+        }
+
+        private async Task LogOutUser(Update up)
         {
             var user = InsertUserInfo(up.Message.Chat.Id);
             await InsertUser(user, up);
             await StartBot(up, "Dear {0} You are logged out!, Please select your user type:");
         }
-        public async Task<bool> CheckUserLogin(Tb_UserInfo userInfo)
+        private async Task<bool> CheckUserLogin(Tb_UserInfo userInfo)
         {
             var url = _configuration["BaseApiUrl"];
             url += string.Format("/api/User/UserLoginForBotManage?UserName={0}&UserType={1}&Password={2}", userInfo.UserName, userInfo.UserType, userInfo.Password);
@@ -289,17 +318,41 @@ namespace ManageTelegramBot.TelegramBot
                     return false;
 
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return false;
             }
 
 
         }
-        public async Task<IEnumerable<AffiliateDto>> GetAffiliates(string email = null)
+        private async Task<Stream> GetAffiliateSellsApi(string affiliateCode)
         {
             var url = _configuration["BaseApiUrl"];
-            url += "/api/Affiliate/GetAffiliateUsers?email=" + email;
+            url += $"/api/Affiliate/GetAffiliateSells?affiliateCode={affiliateCode}";
+            var api = _client.CreateClient();
+            try
+            {
+                HttpResponseMessage messages = await api.GetAsync(url);
+
+                if (messages.IsSuccessStatusCode)
+                {
+                    var result = await messages.Content.ReadAsAsync<JsonResultContent<byte[]>>();
+                    Stream stream = new MemoryStream(result.Data);
+                    return stream;
+                }
+                else
+                    return null;
+
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+        private async Task<IEnumerable<AffiliateDto>> GetAffiliatesApi()
+        {
+            var url = _configuration["BaseApiUrl"];
+            url += "/api/Affiliate/GetAffiliates";
             var api = _client.CreateClient();
             try
             {
@@ -314,35 +367,12 @@ namespace ManageTelegramBot.TelegramBot
                     return null;
 
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return null;
             }
         }
-        public async Task<AffiliateReportDto> GetAffiliateSells(string affiliateCode, string email, string filterDate)
-        {
-            var url = _configuration["BaseApiUrl"];
-            url += string.Format("/api/Sell/GetAffiliateSells?code={0}&email={1}&filterDate={2}", affiliateCode, email, filterDate);
-            var api = _client.CreateClient();
-            try
-            {
-                HttpResponseMessage messages = await api.GetAsync(url);
-
-                if (messages.IsSuccessStatusCode)
-                {
-                    var result = await messages.Content.ReadAsAsync<JsonResultContent<AffiliateReportDto>>();
-                    return result.Data;
-                }
-                else
-                    return null;
-
-            }
-            catch (Exception ex)
-            {
-                return null;
-            }
-        }
-        public async Task EnterUserName(Update up)
+        private async Task EnterUserName(Update up)
         {
             var user = GetUserByChatId(up.Message.Chat.Id);
             user.UserName = up.Message.Text;
@@ -353,7 +383,7 @@ namespace ManageTelegramBot.TelegramBot
             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.enterPassword, replyMarkup: markupKeyboad);
 
         }
-        public async Task StartBot(Update up, string welcomeMsg)
+        private async Task StartBot(Update up, string welcomeMsg)
         {
             var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
             markupKeyboad.ResizeKeyboard = true;
@@ -361,7 +391,7 @@ namespace ManageTelegramBot.TelegramBot
             var message = string.Format(welcomeMsg, up.Message.From.FirstName);
             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
         }
-        public async Task SelectUserType(Update up)
+        private async Task SelectUserType(Update up)
         {
             var userInfo = GetUserByChatId(up.Message.Chat.Id);
             if (userInfo == null)
@@ -379,7 +409,7 @@ namespace ManageTelegramBot.TelegramBot
         }
 
 
-        public ReplyKeyboardMarkup GenerateButton(int ButtonsPerRow, params string[] Buttons)
+        private ReplyKeyboardMarkup GenerateButton(int ButtonsPerRow, params string[] Buttons)
         {
             List<List<KeyboardButton>> buttonsmap = new List<List<KeyboardButton>>()
             {
@@ -404,20 +434,20 @@ namespace ManageTelegramBot.TelegramBot
                 ResizeKeyboard = true,
             };
         }
-        public ReplyKeyboardMarkup GenerateBackButton()
+        private ReplyKeyboardMarkup GenerateBackButton()
         {
             var markupKeyboad = GenerateButton(1, BotConst.back);
             markupKeyboad.ResizeKeyboard = true;
             markupKeyboad.OneTimeKeyboard = true;
             return markupKeyboad;
         }
-        public Tb_UserInfo GetUserLastActivity(long chatId)
+        private Tb_UserInfo GetUserLastActivity(long chatId)
         {
             return _uow.UserInfoRepo
                 .Get(d => d.ChatId == chatId, null, "Tb_UserActivities")
                 .FirstOrDefault();
         }
-        public Tb_UserActivities InsertUserActivity(Guid userInfoId, string message)
+        private Tb_UserActivities InsertUserActivity(Guid userInfoId, string message)
         {
             var userActivity = new Tb_UserActivities()
             {
@@ -428,7 +458,7 @@ namespace ManageTelegramBot.TelegramBot
             };
             return userActivity;
         }
-        public Tb_UserInfo InsertUserInfo(long chatId)
+        private Tb_UserInfo InsertUserInfo(long chatId)
         {
             var userInfo = new Tb_UserInfo()
             {
@@ -437,9 +467,31 @@ namespace ManageTelegramBot.TelegramBot
             };
             return userInfo;
         }
-        public Tb_UserInfo GetUserByChatId(long chatId)
+        private Tb_UserInfo GetUserByChatId(long chatId)
         {
             return _uow.UserInfoRepo.Get(d => d.ChatId == chatId && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+        }
+        private InlineKeyboardMarkup GenerateReplyKeyboardMarkup(List<InlineKeyboardButton> buttons)
+        {
+            int buttonperrow = 3;
+            List<List<InlineKeyboardButton>> buttonsmap = new List<List<InlineKeyboardButton>>()
+            {
+                new List<InlineKeyboardButton>()
+            };
+            int buttonsaddtorow = 0;
+            int rowindex = 0;
+            foreach (var item in buttons)
+            {
+                buttonsmap[rowindex].Add(item);
+                buttonsaddtorow++;
+                if (buttonsaddtorow == buttonperrow)
+                {
+                    rowindex++;
+                    buttonsaddtorow = 0;
+                    buttonsmap.Add(new List<InlineKeyboardButton>());
+                }
+            }
+            return new InlineKeyboardMarkup(buttonsmap);
         }
     }
 }

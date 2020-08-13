@@ -17,6 +17,7 @@ namespace ManageTelegramBot.AppConst
         public const string enterUserName = "Please enter your username:";
         public const string enterPassword = "Please enter your password:";
         public const string selectFilterOption = "Please select your option :";
+        public const string selectAffiliates = "Select Affiliates 🖇";
 
     }
 }

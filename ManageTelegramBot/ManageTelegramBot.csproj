@@ -19,20 +19,5 @@
     <ProjectReference Include="..\Repository\Repository.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Reference Include="EPPlus">
-      <HintPath>..\..\Accounting\Accounting\bin\Debug\netcoreapp3.1\EPPlus.dll</HintPath>
-    </Reference>
-    <Reference Include="MimeKit">
-      <HintPath>..\..\Accounting\Accounting\bin\Debug\netcoreapp3.1\MimeKit.dll</HintPath>
-    </Reference>
-    <Reference Include="PdfRpt.Core">
-      <HintPath>..\..\Accounting\Accounting\bin\Debug\netcoreapp3.1\PdfRpt.Core.dll</HintPath>
-    </Reference>
-    <Reference Include="Syncfusion.Pdf.Portable">
-      <HintPath>..\..\Accounting\Accounting\bin\Debug\netcoreapp3.1\Syncfusion.Pdf.Portable.dll</HintPath>
-    </Reference>
-  </ItemGroup>
-
 
 </Project>

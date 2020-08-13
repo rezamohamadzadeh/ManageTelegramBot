@@ -1,16 +1,13 @@
 using DAL;
-using DAL.Models;
 using ManageTelegramBot.TelegramBot;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Repository;
 using Repository.InterFace;
-using System;
 
 namespace ManageTelegramBot
 {
@@ -26,13 +23,17 @@ namespace ManageTelegramBot
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddHttpClient();
+
             services.AddHttpContextAccessor();
+
             services.AddScoped<IManageBotService, ManageBotService>();
+
             services.AddScoped<IBotService, BotService>();
+
             services.AddTransient<IUnitOfWork, UnitOfWork>();
-            services
-                .AddControllers()
-                .AddNewtonsoftJson();
+
+            services.AddControllers()
+                    .AddNewtonsoftJson();
 
             services.AddDbContext<ApplicationDbContext>(Options => Options.UseSqlServer(Configuration.GetConnectionString("Local")));            
         }
