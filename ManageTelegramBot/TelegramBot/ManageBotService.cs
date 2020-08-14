@@ -382,7 +382,7 @@ namespace ManageTelegramBot.TelegramBot
                         }
                         var markupKeyboard = GenerateButton(0, BotConst.logOut);
 
-                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.selectFilterOption, replyMarkup: markupKeyboard);
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Download Your Document", replyMarkup: markupKeyboard);
 
                         await GetData(up, FilterDate.All);
 
