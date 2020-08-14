@@ -5,6 +5,9 @@ using System.Threading.Tasks;
 
 namespace ManageTelegramBot.AppConst
 {
+    /// <summary>
+    /// Const Messages
+    /// </summary>
     public static class BotConst
     {
         public const string adminText = "Admin 🥇";
@@ -18,6 +21,7 @@ namespace ManageTelegramBot.AppConst
         public const string enterPassword = "Please enter your password:";
         public const string selectFilterOption = "Please select your option :";
         public const string selectAffiliates = "Select Affiliates 🖇";
+        public const string unknownMessage = "🔍 Your message is unknown. Please enter /start !";
 
     }
 }

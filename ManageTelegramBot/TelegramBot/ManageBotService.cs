@@ -2,13 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using Microsoft.AspNetCore.Http;
 using System.Threading.Tasks;
 using DAL.Models;
 using ManageTelegramBot.AppConst;
 using ManageTelegramBot.AppEnum;
 using ManageTelegramBot.Models;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Repository.InterFace;
 using Telegram.Bot.Types;
@@ -20,56 +18,70 @@ using Telegram.Bot.Types.InputFiles;
 namespace ManageTelegramBot.TelegramBot
 {
     /// <summary>
-    /// Connection with Telegram bot and manage it(get affiliate sell report)
+    /// Connection with Telegram bot and manage it(get affiliate reports)
     /// </summary>
 
     public class ManageBotService : IManageBotService
     {
         private readonly IBotService _botService;
-        private readonly IWebHostEnvironment _hostingEnvironment;
         private readonly IUnitOfWork _uow;
         private readonly IHttpClientFactory _client;
         private readonly IConfiguration _configuration;
 
-        private readonly IHttpContextAccessor _httpContext;
-
-        public ManageBotService(IBotService botService,
-            IWebHostEnvironment hostingEnvironment,
-            IUnitOfWork uow,
-            IConfiguration Configuration,
-            IHttpClientFactory client,
-            IHttpContextAccessor httpContext)
+        public ManageBotService(IBotService botService, IUnitOfWork uow, IConfiguration Configuration, IHttpClientFactory client)
         {
             _botService = botService;
-            _hostingEnvironment = hostingEnvironment;
             _uow = uow;
             _configuration = Configuration;
             _client = client;
-            _httpContext = httpContext;
         }
 
         public async Task EchoAsync(Update up)
         {
-
             try
             {
-
+                #region Check Callback Query
+                // if query has call back with inline keyboard
                 if (up.CallbackQuery != null)
                 {
-                    var userInfo = GetUserByChatId(up.CallbackQuery.Message.Chat.Id);
+                    var userInfo = _uow.UserInfoRepo.Get(d => d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
 
-                    if (userInfo == null)
+                    //if user is null or login state is false
+                    if (userInfo == null || !userInfo.LoginState)
                     {
-                        await LogOutUser(up);
+                        var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
+                        markupKeyboad.ResizeKeyboard = true;
+                        markupKeyboad.OneTimeKeyboard = true;
+
+                        string message = "You are logged out!, Please select your user type:";
+
+                        await _botService.Client.SendTextMessageAsync(up.CallbackQuery.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
                         return;
                     }
+                    // if userType != admin 
+                    if (!userInfo.UserType.Contains(BotConst.adminText))
+                    {
+                        var markupKeyboad = GenerateButton(0, BotConst.logOut);
+                        markupKeyboad.ResizeKeyboard = true;
+                        markupKeyboad.OneTimeKeyboard = true;
 
+                        string message = "You do not have access to this section";
+
+                        await _botService.Client.SendTextMessageAsync(up.CallbackQuery.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                        return;
+                    }
                     try
                     {
+                        //get files from api after click on inline keyabordbtn
+
                         var affiliateSell = await GetAffiliateSellsApi(up.CallbackQuery.Data);
                         var inputOnlineFile = new InputOnlineFile(affiliateSell, up.CallbackQuery.Data + ".pdf");
 
                         var message = await _botService.Client.SendTextMessageAsync(up.CallbackQuery.Message.Chat.Id, "Sending file...");
+                        await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, "Report " + up.CallbackQuery.Data + " AffiliateCode"));
+                        await _uow.SaveAsync();
                         await _botService.Client.SendDocumentAsync(up.CallbackQuery.Message.Chat.Id, inputOnlineFile);
                         await _botService.Client.DeleteMessageAsync(up.CallbackQuery.Message.Chat.Id, message.MessageId);
 
@@ -82,46 +94,174 @@ namespace ManageTelegramBot.TelegramBot
 
                     return;
                 }
+                #endregion
+
                 if (up.Message.Type == MessageType.Text)
                 {
                     var userInfo = GetUserByChatId(up.Message.Chat.Id);
                     var lastState = _uow.UserActivitiesRepo.Get(d => d.Tb_UserInfo.ChatId == up.Message.Chat.Id && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
 
+                    #region Start
                     if (up.Message.Text == "/start")
                     {
                         var user = InsertUserInfo(up.Message.Chat.Id);
                         await InsertUser(user, up);
 
                         await StartBot(up, "Hello {0} ✋, Please select your user type on system :");
+
+                        return;
                     }
-                    else if (userInfo == null)
-                    {
-                        await LogOutUser(up);
-                    }
-                    else if (up.Message.Text == BotConst.adminText || up.Message.Text == BotConst.affiliateText)
+                    #endregion
+
+                    #region Select UserType
+                    if (up.Message.Text == BotConst.adminText || up.Message.Text == BotConst.affiliateText)
                     {
                         await SelectUserType(up);
+
+                        return;
                     }
-                    else if (up.Message.Text.Contains(FilterDate.All.ToString()))
+                    #endregion
+
+                    #region CheckUserExpire in ActivityUser Table
+                    if (lastState == null)
+                    {
+                        await LogOutUser(up);
+
+                        return;
+
+                    }
+                    #endregion
+
+                    #region CheckUserInfo
+                    if (userInfo == null)
+                    {
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.unknownMessage);
+
+                        return;
+                    }
+                    #endregion
+
+                    #region Select All FilterDate SellReport
+                    if (up.Message.Text.Contains(FilterDate.All.ToString()))
+                    {
+                        if (!userInfo.LoginState)
+                        {
+                            var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You are logged out!, Please select your user type:";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else if(!userInfo.UserType.Contains(BotConst.adminText))
+                        {
+                            var markupKeyboad = GenerateButton(0, BotConst.logOut);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You do not have access to this section";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else
+                        {
+                            await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
+                            await _uow.SaveAsync();
+                            await GetData(up, FilterDate.All);
+
+                            return;
+                        }
+                        
+                    }
+                    #endregion
+
+                    #region Select Monthly FilterDate SellReport
+                    if (up.Message.Text.Contains(FilterDate.Monthly.ToString()))
+                    {
+                        if (!userInfo.LoginState)
+                        {
+                            var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You are logged out!, Please select your user type:";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else if (!userInfo.UserType.Contains(BotConst.adminText))
+                        {
+                            var markupKeyboad = GenerateButton(0, BotConst.logOut);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You do not have access to this section";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else
+                        {
+                            await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
+                            await _uow.SaveAsync();
+                            await GetData(up, FilterDate.Monthly);
+
+                            return;
+                        }
+                        
+                    }
+                    #endregion
+
+                    #region Select Weekly FilterDate SellReport
+                    if (up.Message.Text.Contains(FilterDate.Weekly.ToString()))
+                    {
+                        if (!userInfo.LoginState)
+                        {
+                            var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You are logged out!, Please select your user type:";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else if (!userInfo.UserType.Contains(BotConst.adminText))
+                        {
+                            var markupKeyboad = GenerateButton(0, BotConst.logOut);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You do not have access to this section";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else
+                        {
+                            await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
+                            await _uow.SaveAsync();
+                            await GetData(up, FilterDate.Weekly);
+
+                            return;
+                        }
+                        
+                    }
+                    #endregion
+
+                    #region Back Btn Clicled
+                    if (up.Message.Text == BotConst.back)
                     {
 
-                        await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
-                        await GetData(up, FilterDate.All);
-
-                    }
-                    else if (up.Message.Text.Contains(FilterDate.Monthly.ToString()))
-                    {
-                        await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
-                        await GetData(up, FilterDate.Monthly);
-                    }
-                    else if (up.Message.Text.Contains(FilterDate.Weekly.ToString()))
-                    {
-                        await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
-                        await GetData(up, FilterDate.Weekly);
-                    }
-
-                    else if (up.Message.Text == BotConst.back)
-                    {
                         if (lastState.Message.Contains(BotConst.adminText) || lastState.Message == BotConst.affiliateText)
                             await StartBot(up, "Dear {0}, Please select your user type:");
 
@@ -131,92 +271,147 @@ namespace ManageTelegramBot.TelegramBot
                             up.Message.Text = user.UserType;
                             await SelectUserType(up);
                         }
+
+                        return;
                     }
-                    else if (up.Message.Text == BotConst.selectAffiliates)
+                    #endregion
+
+                    #region Get Affiliate List with inlineKeyBtn
+                    if (up.Message.Text == BotConst.selectAffiliates)
                     {
-                        List<InlineKeyboardButton> btnList = new List<InlineKeyboardButton>();
-
-                        var affiliates = await GetAffiliatesApi();
-                        foreach (var affiliate in affiliates)
+                        if (!userInfo.LoginState)
                         {
-                            btnList.Add(new InlineKeyboardButton() { Text = affiliate.FirstName, CallbackData = affiliate.Code });
+                            var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
 
+                            string message = "You are logged out!, Please select your user type:";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
                         }
-
-                        var inlineBtns = GenerateReplyKeyboardMarkup(btnList);
-                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Affiliates List", ParseMode.Default, false, false, 0, inlineBtns);
-
-                        var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
-
-                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Please select affiliate user 👆", replyMarkup: markupKeyboard);
-                    }
-                    else if (up.Message.Text == BotConst.logOut)
-                    {
-                        await LogOutUser(up);
-                    }
-                    else
-                    {
-                        if (lastState == null)
+                        else if (!userInfo.UserType.Contains(BotConst.adminText))
                         {
-                            await LogOutUser(up);
+                            var markupKeyboad = GenerateButton(0, BotConst.logOut);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
 
-                        }
-                        else if (lastState.Message == BotConst.adminText || lastState.Message == BotConst.affiliateText)
-                        {
-                            await EnterUserName(up);
-                        }
-                        else if (lastState.Message == BotConst.enterUserName)
-                        {
+                            string message = "You do not have access to this section";
 
-                            var user = GetUserByChatId(up.Message.Chat.Id);
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
 
-                            user.Password = up.Message.Text;
-                            _uow.UserInfoRepo.Update(user);
-                            //await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(user.Id, BotConst.enterPassword));
-                            await _uow.SaveAsync();
-                            var markupKeyboad = GenerateBackButton();
-
-                            if (!await CheckUserLogin(user))
-                            {
-                                await InvalidLogin(up, "❌ Invalid Login.");
-                                up.Message.Text = user.UserType;
-                                await SelectUserType(up);
-                                return;
-                            }
-
-                            user.LoginState = true;
-                            _uow.UserInfoRepo.Update(user);
-                            await _uow.SaveAsync();
-
-                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "✅ Logged in successfully.");
-                            if (user.UserType.Contains(BotConst.adminText))
-                            {
-                                var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
-
-                                await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.selectFilterOption, replyMarkup: markupKeyboard);
-
-                                return;
-                            }
-                            await GetData(up, FilterDate.None);
+                            return;
                         }
                         else
-                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "🔍 Your message is unknown. Please enter /start and select your user type!");
+                        {
+                            List<InlineKeyboardButton> btnList = new List<InlineKeyboardButton>();
 
+                            var affiliates = await GetAffiliatesApi();
+                            foreach (var affiliate in affiliates)
+                            {
+                                btnList.Add(new InlineKeyboardButton() { Text = affiliate.FirstName, CallbackData = affiliate.Code });
 
+                            }
+
+                            var inlineBtns = GenerateReplyKeyboardMarkup(btnList);
+                            await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
+                            await _uow.SaveAsync();
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Affiliates List", ParseMode.Default, false, false, 0, inlineBtns);
+
+                            var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Please select affiliate user 👆", replyMarkup: markupKeyboard);
+
+                            return;
+                        }
+                        
                     }
+                    #endregion
+
+                    #region Logout
+                    if (up.Message.Text == BotConst.logOut)
+                    {
+                        await LogOutUser(up);
+
+                        return;
+                    }
+                    #endregion
+
+                    #region Login
+                    
+                    if (lastState.Message == BotConst.adminText || lastState.Message == BotConst.affiliateText)
+                    {
+                        await EnterUserName(up);
+                    }
+                    else if (lastState.Message == BotConst.enterUserName)
+                    {
+
+                        var user = GetUserByChatId(up.Message.Chat.Id);
+
+                        user.Password = up.Message.Text;
+                        _uow.UserInfoRepo.Update(user);
+                        //await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(user.Id, BotConst.enterPassword));
+                        await _uow.SaveAsync();
+                        var markupKeyboad = GenerateBackButton();
+
+                        if (!await CheckUserLoginApi(user))
+                        {
+                            await InvalidLogin(up, "❌ Invalid Login.");
+                            up.Message.Text = user.UserType;
+                            await SelectUserType(up);
+                            return;
+                        }
+
+                        user.LoginState = true;
+                        _uow.UserInfoRepo.Update(user);
+                        await _uow.SaveAsync();
+
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "✅ Logged in successfully.");
+                        if (user.UserType.Contains(BotConst.adminText))
+                        {
+                            var makupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.selectFilterOption, replyMarkup: makupKeyboard);
+
+                            return;
+                        }
+                        var markupKeyboard = GenerateButton(0, BotConst.logOut);
+
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.selectFilterOption, replyMarkup: markupKeyboard);
+
+                        await GetData(up, FilterDate.All);
+
+                        return;
+                    }
+                    else
+                        await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.unknownMessage);
+
+                    #endregion
+
                 }
             }
             catch (Exception)
             {
-
+                await LogOutUser(up);
             }
 
         }
 
+        /// <summary>
+        ///  Mapping Inser user properties
+        /// </summary>
+        /// <param name="user"></param>
+        /// <param name="up"></param>
+        /// <returns></returns>
         private async Task InsertUser(Tb_UserInfo user, Update up)
         {
+
             await _uow.UserInfoRepo.InsertAsync(user);
-            await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(user.Id, up.Message.Text));
+            if (up.CallbackQuery != null)
+                await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(user.Id, up.CallbackQuery.Message.Text));
+            else
+                await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(user.Id, up.Message.Text));
             await _uow.SaveAsync();
         }
 
@@ -228,14 +423,15 @@ namespace ManageTelegramBot.TelegramBot
         /// <returns></returns>
         private async Task InvalidLogin(Update up, string message)
         {
-            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message);
-            // TODO: This has been added.
-            //await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Please enter your username:", replyMarkup: new ForceReplyMarkup());
+            if (up.CallbackQuery != null)
+                await _botService.Client.SendTextMessageAsync(up.CallbackQuery.Message.Chat.Id, message);
+            else
+                await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message);
         }
 
 
         /// <summary>
-        /// Get Affiliate report sell after authenticated
+        /// Get Affiliate report sell after successfully authenticated
         /// </summary>
         /// <param name="userAuth"></param>
         /// <param name="user"></param>
@@ -262,14 +458,21 @@ namespace ManageTelegramBot.TelegramBot
                 await _botService.Client.DeleteMessageAsync(up.Message.Chat.Id, message.MessageId);
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                await InvalidLogin(up, "❌ Invalid Login.");
+                await InvalidLogin(up, "❌ Invalid Login. " + ex.Message);
                 await LogOutUser(up);
             }
 
         }
 
+        /// <summary>
+        /// Generate AffiliateSellReport Pdf File From Api
+        /// </summary>
+        /// <param name="filterDate"></param>
+        /// <param name="userType"></param>
+        /// <param name="email"></param>
+        /// <returns></returns>
         private async Task<Stream> GetAffiliateReportApi(string filterDate, string userType, string email)
         {
             var url = _configuration["BaseApiUrl"];
@@ -296,13 +499,29 @@ namespace ManageTelegramBot.TelegramBot
 
         }
 
+        /// <summary>
+        /// Log out user
+        /// </summary>
+        /// <param name="up"></param>
+        /// <returns></returns>
         private async Task LogOutUser(Update up)
         {
-            var user = InsertUserInfo(up.Message.Chat.Id);
+            Tb_UserInfo user;
+            if (up.CallbackQuery != null)
+                user = InsertUserInfo(up.CallbackQuery.Message.Chat.Id);
+            else
+                user = InsertUserInfo(up.Message.Chat.Id);
+
             await InsertUser(user, up);
             await StartBot(up, "Dear {0} You are logged out!, Please select your user type:");
         }
-        private async Task<bool> CheckUserLogin(Tb_UserInfo userInfo)
+
+        /// <summary>
+        /// Check User Login with Api
+        /// </summary>
+        /// <param name="userInfo"></param>
+        /// <returns></returns>
+        private async Task<bool> CheckUserLoginApi(Tb_UserInfo userInfo)
         {
             var url = _configuration["BaseApiUrl"];
             url += string.Format("/api/User/UserLoginForBotManage?UserName={0}&UserType={1}&Password={2}", userInfo.UserName, userInfo.UserType, userInfo.Password);
@@ -325,6 +544,12 @@ namespace ManageTelegramBot.TelegramBot
 
 
         }
+
+        /// <summary>
+        /// Get Affiliate Pdf SellReport After select inlineKeyBtn 
+        /// </summary>
+        /// <param name="affiliateCode"></param>
+        /// <returns></returns>
         private async Task<Stream> GetAffiliateSellsApi(string affiliateCode)
         {
             var url = _configuration["BaseApiUrl"];
@@ -349,6 +574,11 @@ namespace ManageTelegramBot.TelegramBot
                 return null;
             }
         }
+
+        /// <summary>
+        /// Get All Affiliates user Api
+        /// </summary>
+        /// <returns></returns>
         private async Task<IEnumerable<AffiliateDto>> GetAffiliatesApi()
         {
             var url = _configuration["BaseApiUrl"];
@@ -372,7 +602,14 @@ namespace ManageTelegramBot.TelegramBot
                 return null;
             }
         }
+
+        /// <summary>
+        /// Run enter user command after select usertype
+        /// </summary>
+        /// <param name="up"></param>
+        /// <returns></returns>
         private async Task EnterUserName(Update up)
+
         {
             var user = GetUserByChatId(up.Message.Chat.Id);
             user.UserName = up.Message.Text;
@@ -383,14 +620,32 @@ namespace ManageTelegramBot.TelegramBot
             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.enterPassword, replyMarkup: markupKeyboad);
 
         }
+
+        /// <summary>
+        /// Run start bot command
+        /// </summary>
+        /// <param name="up"></param>
+        /// <param name="welcomeMsg"></param>
+        /// <returns></returns>
         private async Task StartBot(Update up, string welcomeMsg)
         {
             var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
             markupKeyboad.ResizeKeyboard = true;
             markupKeyboad.OneTimeKeyboard = true;
-            var message = string.Format(welcomeMsg, up.Message.From.FirstName);
-            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+            string message = up.CallbackQuery != null ? "You are logged out!, Please select your user type:" : string.Format(welcomeMsg, up.Message.From.FirstName);
+
+            if (up.CallbackQuery != null)
+                await _botService.Client.SendTextMessageAsync(up.CallbackQuery.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+            else
+                await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
         }
+
+        /// <summary>
+        /// Run Select user command after start bot
+        /// </summary>
+        /// <param name="up"></param>
+        /// <returns></returns>
         private async Task SelectUserType(Update up)
         {
             var userInfo = GetUserByChatId(up.Message.Chat.Id);
@@ -409,6 +664,12 @@ namespace ManageTelegramBot.TelegramBot
         }
 
 
+        /// <summary>
+        /// Generate dynamic keyboard btn
+        /// </summary>
+        /// <param name="ButtonsPerRow"></param>
+        /// <param name="Buttons"></param>
+        /// <returns></returns>
         private ReplyKeyboardMarkup GenerateButton(int ButtonsPerRow, params string[] Buttons)
         {
             List<List<KeyboardButton>> buttonsmap = new List<List<KeyboardButton>>()
@@ -434,6 +695,11 @@ namespace ManageTelegramBot.TelegramBot
                 ResizeKeyboard = true,
             };
         }
+
+        /// <summary>
+        /// Generate dynamic back btn
+        /// </summary>
+        /// <returns></returns>
         private ReplyKeyboardMarkup GenerateBackButton()
         {
             var markupKeyboad = GenerateButton(1, BotConst.back);
@@ -441,12 +707,13 @@ namespace ManageTelegramBot.TelegramBot
             markupKeyboad.OneTimeKeyboard = true;
             return markupKeyboad;
         }
-        private Tb_UserInfo GetUserLastActivity(long chatId)
-        {
-            return _uow.UserInfoRepo
-                .Get(d => d.ChatId == chatId, null, "Tb_UserActivities")
-                .FirstOrDefault();
-        }
+
+        /// <summary>
+        /// Mapping useractivity properties
+        /// </summary>
+        /// <param name="userInfoId"></param>
+        /// <param name="message"></param>
+        /// <returns></returns>
         private Tb_UserActivities InsertUserActivity(Guid userInfoId, string message)
         {
             var userActivity = new Tb_UserActivities()
@@ -458,6 +725,12 @@ namespace ManageTelegramBot.TelegramBot
             };
             return userActivity;
         }
+
+        /// <summary>
+        /// After mapping, this method call for insert new value in db
+        /// </summary>
+        /// <param name="chatId"></param>
+        /// <returns></returns>
         private Tb_UserInfo InsertUserInfo(long chatId)
         {
             var userInfo = new Tb_UserInfo()
@@ -467,10 +740,22 @@ namespace ManageTelegramBot.TelegramBot
             };
             return userInfo;
         }
+
+        /// <summary>
+        /// Get user by chatId
+        /// </summary>
+        /// <param name="chatId"></param>
+        /// <returns></returns>
         private Tb_UserInfo GetUserByChatId(long chatId)
         {
-            return _uow.UserInfoRepo.Get(d => d.ChatId == chatId && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+            return _uow.UserInfoRepo.Get(d => d.ChatId == chatId, d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
         }
+
+        /// <summary>
+        /// Generate dynamic InlineBtns for show affiliate users
+        /// </summary>
+        /// <param name="buttons"></param>
+        /// <returns></returns>
         private InlineKeyboardMarkup GenerateReplyKeyboardMarkup(List<InlineKeyboardButton> buttons)
         {
             int buttonperrow = 3;
