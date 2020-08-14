@@ -44,7 +44,11 @@ namespace ManageTelegramBot.TelegramBot
                 // if query has call back with inline keyboard
                 if (up.CallbackQuery != null)
                 {
-                    var userInfo = _uow.UserInfoRepo.Get(d => d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+                    await _botService.Client.SendChatActionAsync(up.CallbackQuery.Message.Chat.Id, ChatAction.Typing);
+
+
+                    //var userInfo = _uow.UserInfoRepo.Get(d => d.ChatId == up.CallbackQuery.Message.Chat.Id && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+                    var userInfo = _uow.UserInfoRepo.Get(d => d.ChatId == up.CallbackQuery.Message.Chat.Id , d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
 
                     //if user is null or login state is false
                     if (userInfo == null || !userInfo.LoginState)
@@ -100,13 +104,13 @@ namespace ManageTelegramBot.TelegramBot
                 {
                     var userInfo = GetUserByChatId(up.Message.Chat.Id);
                     var lastState = _uow.UserActivitiesRepo.Get(d => d.Tb_UserInfo.ChatId == up.Message.Chat.Id && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+                    await _botService.Client.SendChatActionAsync(up.Message.Chat.Id, ChatAction.Typing);
 
                     #region Start
                     if (up.Message.Text == "/start")
                     {
                         var user = InsertUserInfo(up.Message.Chat.Id);
                         await InsertUser(user, up);
-
                         await StartBot(up, "Hello {0} ✋, Please select your user type on system :");
 
                         return;
