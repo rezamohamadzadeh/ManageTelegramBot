@@ -48,7 +48,7 @@ namespace ManageTelegramBot.TelegramBot
 
 
                     //var userInfo = _uow.UserInfoRepo.Get(d => d.ChatId == up.CallbackQuery.Message.Chat.Id && d.CreateDateTime > DateTime.Now.AddMinutes(-10), d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
-                    var userInfo = _uow.UserInfoRepo.Get(d => d.ChatId == up.CallbackQuery.Message.Chat.Id , d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
+                    var userInfo = _uow.UserInfoRepo.Get(d => d.ChatId == up.CallbackQuery.Message.Chat.Id, d => d.OrderByDescending(m => m.CreateDateTime)).FirstOrDefault();
 
                     //if user is null or login state is false
                     if (userInfo == null || !userInfo.LoginState)
@@ -160,7 +160,7 @@ namespace ManageTelegramBot.TelegramBot
 
                             return;
                         }
-                        else if(!userInfo.UserType.Contains(BotConst.adminText))
+                        else if (!userInfo.UserType.Contains(BotConst.adminText))
                         {
                             var markupKeyboad = GenerateButton(0, BotConst.logOut);
                             markupKeyboad.ResizeKeyboard = true;
@@ -180,7 +180,7 @@ namespace ManageTelegramBot.TelegramBot
 
                             return;
                         }
-                        
+
                     }
                     #endregion
 
@@ -219,7 +219,7 @@ namespace ManageTelegramBot.TelegramBot
 
                             return;
                         }
-                        
+
                     }
                     #endregion
 
@@ -258,11 +258,11 @@ namespace ManageTelegramBot.TelegramBot
 
                             return;
                         }
-                        
+
                     }
                     #endregion
 
-                    #region Back Btn Clicled
+                    #region Back Btn Clickled
                     if (up.Message.Text == BotConst.back)
                     {
 
@@ -323,16 +323,60 @@ namespace ManageTelegramBot.TelegramBot
                             await _uow.SaveAsync();
                             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Affiliates List", ParseMode.Default, false, false, 0, inlineBtns);
 
-                            var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
+                            var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.TopAffiliatesSell, BotConst.logOut);
 
                             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Please select affiliate user 👆", replyMarkup: markupKeyboard);
 
                             return;
                         }
-                        
+
                     }
                     #endregion
 
+                    #region Get Top Affiliates Sell 
+                    if (up.Message.Text == BotConst.TopAffiliatesSell)
+                    {
+                        if (!userInfo.LoginState)
+                        {
+                            var markupKeyboad = GenerateButton(2, BotConst.adminText, BotConst.affiliateText);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You are logged out!, Please select your user type:";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else if (!userInfo.UserType.Contains(BotConst.adminText))
+                        {
+                            var markupKeyboad = GenerateButton(0, BotConst.logOut);
+                            markupKeyboad.ResizeKeyboard = true;
+                            markupKeyboad.OneTimeKeyboard = true;
+
+                            string message = "You do not have access to this section";
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, message, replyMarkup: markupKeyboad);
+
+                            return;
+                        }
+                        else
+                        {
+                            await _uow.UserActivitiesRepo.InsertAsync(InsertUserActivity(userInfo.Id, up.Message.Text));
+                            await _uow.SaveAsync();
+                            var topSells = await GetTopAffiliatesSellApi();
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, topSells);
+
+                            var markupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.TopAffiliatesSell, BotConst.logOut);
+
+                            await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "Report of top affiliates sell 👆", replyMarkup: markupKeyboard);
+
+                            return;
+                        }
+
+                    }
+                    #endregion
                     #region Logout
                     if (up.Message.Text == BotConst.logOut)
                     {
@@ -343,7 +387,7 @@ namespace ManageTelegramBot.TelegramBot
                     #endregion
 
                     #region Login
-                    
+
                     if (lastState.Message == BotConst.adminText || lastState.Message == BotConst.affiliateText)
                     {
                         await EnterUserName(up);
@@ -374,7 +418,7 @@ namespace ManageTelegramBot.TelegramBot
                         await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, "✅ Logged in successfully.");
                         if (user.UserType.Contains(BotConst.adminText))
                         {
-                            var makupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.logOut);
+                            var makupKeyboard = GenerateButton(3, BotConst.all, BotConst.monthly, BotConst.weekly, BotConst.selectAffiliates, BotConst.TopAffiliatesSell, BotConst.logOut);
 
                             await _botService.Client.SendTextMessageAsync(up.Message.Chat.Id, BotConst.selectFilterOption, replyMarkup: makupKeyboard);
 
@@ -466,6 +510,42 @@ namespace ManageTelegramBot.TelegramBot
             {
                 await InvalidLogin(up, "❌ Invalid Login. " + ex.Message);
                 await LogOutUser(up);
+            }
+
+        }
+        /// <summary>
+        /// Get top affiliates sell report from api
+        /// </summary>
+        /// <returns></returns>
+        private async Task<string> GetTopAffiliatesSellApi()
+        {
+            var url = _configuration["BaseApiUrl"];
+            url += string.Format("/api/Affiliate/GetTopAffiliateSells");
+            var api = _client.CreateClient();
+            try
+            {
+                HttpResponseMessage messages = await api.GetAsync(url);
+
+                if (messages.IsSuccessStatusCode)
+                {
+                    var contentResult = await messages.Content.ReadAsAsync<JsonResultContent<List<TopAffiliatesSellDto>>>();
+                    String result = "";
+                    int count = 1;
+                    foreach (var item in contentResult.Data)
+                    {
+                        var sells = item.Count <= 1 ? " sell " : " sells ";
+                        result += count + ". " + item.Name + " with " + item.Count + sells + "\n\n";
+                        count++;
+                    }
+                    return result;
+                }
+                else
+                    return null;
+
+            }
+            catch (Exception)
+            {
+                return null;
             }
 
         }
